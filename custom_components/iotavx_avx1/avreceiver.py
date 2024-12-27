@@ -8,6 +8,7 @@ class AVReceiver:
             "power": "OFF",
             "mute": False,
             "mode": "DIRECT",
+            "volume": 0,  # Lautstärke wird hier gespeichert
         }
         self._start_reading_thread()
 
@@ -24,7 +25,12 @@ class AVReceiver:
         while True:
             try:
                 response = self.ser.readline().decode().strip()
-                if response == "DIM":
+                if response.startswith("@14K"):
+                    volume_raw = response[4:]
+                    if volume_raw.isdigit():
+                        volume = int(volume_raw) / 10.0
+                        self.current_status["volume"] = volume
+                elif response == "DIM":
                     self.current_status["power"] = "ON"
                 # Weitere Logik für andere Befehle kann hier hinzugefügt werden
             except Exception as e:
@@ -33,4 +39,3 @@ class AVReceiver:
     def get_status(self, key):
         """Retrieve the current status."""
         return self.current_status.get(key, None)
-

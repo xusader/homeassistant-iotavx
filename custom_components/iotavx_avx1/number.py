@@ -37,6 +37,5 @@ class VolumeSlider(NumberEntity):
         self._value = value
 
     def update(self):
-        """Update the state if necessary."""
-        pass
-
+        """Update the state based on the receiver's reported volume."""
+        self._value = self._receiver.get_status("volume")
