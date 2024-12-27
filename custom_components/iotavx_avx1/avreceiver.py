@@ -10,11 +10,21 @@ class AVReceiver:
             "mode": "DIRECT",
             "volume": 0,  # Lautstärke wird hier gespeichert
         }
+        self.callbacks = []
         self._start_reading_thread()
 
     def send_command(self, command):
         """Send a command to the receiver."""
         self.ser.write(f"'{command}'".encode())
+
+    def register_callback(self, callback):
+        """Register a callback to notify on status changes."""
+        self.callbacks.append(callback)
+
+    def _notify_callbacks(self):
+        """Notify all registered callbacks about a status update."""
+        for callback in self.callbacks:
+            callback()
 
     def _start_reading_thread(self):
         """Start a background thread to listen to the serial port."""
@@ -29,9 +39,12 @@ class AVReceiver:
                     volume_raw = response[4:]
                     if volume_raw.isdigit():
                         volume = int(volume_raw) / 10.0
-                        self.current_status["volume"] = volume
+                        if volume != self.current_status["volume"]:
+                            self.current_status["volume"] = volume
+                            self._notify_callbacks()
                 elif response == "DIM":
                     self.current_status["power"] = "ON"
+                    self._notify_callbacks()
                 # Weitere Logik für andere Befehle kann hier hinzugefügt werden
             except Exception as e:
                 print(f"Error reading from serial port: {e}")
@@ -39,3 +52,4 @@ class AVReceiver:
     def get_status(self, key):
         """Retrieve the current status."""
         return self.current_status.get(key, None)
+

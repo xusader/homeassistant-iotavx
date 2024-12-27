@@ -4,7 +4,9 @@ from .avreceiver import AVReceiver
 def setup_platform(hass, config, add_entities, discovery_info=None):
     port = config.get("port")
     receiver = AVReceiver(port)
-    add_entities([VolumeSlider(receiver)], True)
+    volume_slider = VolumeSlider(receiver)
+    receiver.register_callback(volume_slider.schedule_update_ha_state)
+    add_entities([volume_slider], True)
 
 class VolumeSlider(NumberEntity):
     def __init__(self, receiver):
