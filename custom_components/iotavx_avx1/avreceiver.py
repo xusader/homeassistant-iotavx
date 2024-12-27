@@ -36,6 +36,7 @@ class AVReceiver:
             try:
                 response = self.ser.readline().decode().strip()
                 if response.startswith("@14K"):
+                    # Extrahiere die Lautstärke als Integer und teile durch 10
                     volume_raw = response[4:]
                     if volume_raw.isdigit():
                         volume = int(volume_raw) / 10.0
@@ -52,4 +53,3 @@ class AVReceiver:
     def get_status(self, key):
         """Retrieve the current status."""
         return self.current_status.get(key, None)
-
