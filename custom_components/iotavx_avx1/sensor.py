@@ -1,105 +1,115 @@
 import serial
-import threading
-import logging
 from homeassistant.helpers.entity import Entity
-from .const import DOMAIN
+import logging
 
 _LOGGER = logging.getLogger(__name__)
 
-def setup_platform(hass, config, add_entities, discovery_info=None):
+async def async_setup_platform(hass, config, async_add_entities, discovery_info=None):
+    """Set up the sensor platform."""
     port = config.get("port")
+    
+    # Initialize the receiver and save it to hass.data
     receiver = AVReceiver(port)
-    add_entities([IOTAVXAVX1PowerSensor(receiver), IOTAVXAVX1VolumeSensor(receiver)], True)
+    hass.data["iotavx_avx1"] = {"receiver": receiver}
+
+    async_add_entities([
+        PowerSensor(receiver),
+        VolumeSensor(receiver)
+    ], True)
 
 class AVReceiver:
     def __init__(self, port):
-        """Initialize the AV Receiver."""
         try:
             self.ser = serial.Serial(port, 9600, timeout=1)
-            _LOGGER.info(f"Connected to AV Receiver on port {port}")
+            _LOGGER.info(f"Connected to serial port: {port}")
         except serial.SerialException as e:
             _LOGGER.error(f"Failed to connect to serial port {port}: {e}")
-            raise
+            raise e
 
-        self.callbacks = []
-        self.running = True
-        threading.Thread(target=self._read_serial, daemon=True).start()
-
-    def _read_serial(self):
-        """Continuously read from the serial port."""
-        while self.running:
-            try:
-                if self.ser.in_waiting > 0:
-                    response = self.ser.readline().decode().strip()
-                    _LOGGER.debug(f"Received response: {response}")
-                    self._notify_callbacks(response)
-            except Exception as e:
-                _LOGGER.error(f"Error reading serial response: {e}")
-
-    def send_command(self, command):
-        """Send a command to the AV Receiver."""
+    async def send_command(self, command):
+        """Asynchronously send a command to the serial device."""
         try:
-            self.ser.write(f"'{command}'".encode())
-            _LOGGER.debug(f"Sent command: '{command}'")
+            self.ser.write(f"'{command}'".encode())  # Send the command with quotes
+            _LOGGER.debug(f"Sent command: {command}")
         except Exception as e:
-            _LOGGER.error(f"Error sending command '{command}': {e}")
+            _LOGGER.error(f"Failed to send command '{command}': {e}")
 
-    def _notify_callbacks(self, response):
-        """Notify all registered callbacks about a new response."""
-        for callback in self.callbacks:
-            callback(response)
+    async def read_response(self):
+        """Asynchronously read response from the serial device."""
+        try:
+            response = self.ser.readline().decode().strip()
+            _LOGGER.debug(f"Received response: {response}")
+            return response
+        except Exception as e:
+            _LOGGER.error(f"Failed to read from serial port: {e}")
+            return None
 
-    def register_callback(self, callback):
-        """Register a callback to be notified of incoming serial data."""
-        self.callbacks.append(callback)
+class PowerSensor(Entity):
+    """Representation of the power state."""
 
-class IOTAVXAVX1PowerSensor(Entity):
     def __init__(self, receiver):
-        """Initialize the Power Sensor."""
         self._receiver = receiver
         self._state = "OFF"
-        self._receiver.register_callback(self._update_callback)
 
     @property
     def name(self):
-        return "IOTAVX AVX1 Power"
+        return "Power Sensor"
 
     @property
     def state(self):
         return self._state
 
-    def _update_callback(self, response):
-        """Update the power state based on the response."""
-        if "DIM3*" in response:
-            self._state = "ON"
-        else:
-            self._state = "OFF"
-        self.schedule_update_ha_state()
+    async def async_update(self):
+        """Fetch the latest power state."""
+        try:
+            # Sending status command
+            await self._receiver.send_command("@12S")
+            response = await self._receiver.read_response()
+            if response:
+                if "DIM" in response:
+                    self._state = "ON"
+                else:
+                    self._state = "OFF"
+                _LOGGER.debug(f"Power state updated to: {self._state}")
+            else:
+                _LOGGER.warning("No response received for Power Sensor")
+        except Exception as e:
+            _LOGGER.error(f"Failed to update Power Sensor: {e}")
 
-class IOTAVXAVX1VolumeSensor(Entity):
+class VolumeSensor(Entity):
+    """Representation of the volume level."""
+
     def __init__(self, receiver):
-        """Initialize the Volume Sensor."""
         self._receiver = receiver
         self._state = 0
-        self._receiver.register_callback(self._update_callback)
 
     @property
     def name(self):
-        return "IOTAVX AVX1 Volume"
+        return "Volume Sensor"
 
     @property
     def state(self):
         return self._state
 
-    def _update_callback(self, response):
-        """Update the volume based on the response."""
-        if "@14K" in response:
-            try:
-                # Extract the volume from the response
-                volume_str = response.split("@14K")[1]
-                volume_str = ''.join(filter(str.isdigit, volume_str))  # Extract numeric part only
-                self._state = int(volume_str) / 10  # Convert to a 0-80 range
-                _LOGGER.debug(f"Extracted volume: {self._state}")
-            except (IndexError, ValueError) as e:
-                _LOGGER.error(f"Failed to parse volume from response '{response}': {e}")
-        self.schedule_update_ha_state()
+    async def async_update(self):
+        """Fetch the latest volume level."""
+        try:
+            # Sending volume status command
+            await self._receiver.send_command("@14K")
+            response = await self._receiver.read_response()
+            if response:
+                if "@14K" in response:
+                    # Extract the volume value from the response
+                    # Clean the response to remove unwanted characters
+                    volume_str = response.split("@14K")[-1].strip("'")
+                    try:
+                        self._state = int(volume_str) / 10.0
+                        _LOGGER.debug(f"Volume state updated to: {self._state}")
+                    except ValueError as e:
+                        _LOGGER.error(f"Error parsing volume: {e}, response: {response}")
+                else:
+                    _LOGGER.debug(f"Incorrect volume response: {response}")
+            else:
+                _LOGGER.warning("No response received for Volume Sensor")
+        except Exception as e:
+            _LOGGER.error(f"Failed to update Volume Sensor: {e}")
